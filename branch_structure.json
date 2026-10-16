@@ -1,0 +1,30 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection",
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection-r2",
+    "fix/issue-61-auditor-platform-financial-volume-widget",
+    "fix/issue-61-auditor-platform-financial-volume-widget-r2",
+    "fix/malware-scanner-self-detection",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection": "main",
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection-r2": "fix/issue-60-auditor-suspicious-activity-anomaly-detection",
+    "fix/issue-61-auditor-platform-financial-volume-widget": "main",
+    "fix/issue-61-auditor-platform-financial-volume-widget-r2": "fix/issue-61-auditor-platform-financial-volume-widget",
+    "fix/malware-scanner-self-detection": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection",
+    "fix/issue-61-auditor-platform-financial-volume-widget",
+    "fix/malware-scanner-self-detection",
+    "origin",
+    "fix/issue-60-auditor-suspicious-activity-anomaly-detection-r2",
+    "fix/issue-61-auditor-platform-financial-volume-widget-r2"
+  ]
+}
