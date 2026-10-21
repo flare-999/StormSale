@@ -28,7 +28,6 @@ issues.csv
 generate_commits.sh
 
 # Editor directories and files
-.vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
@@ -38,3 +37,4 @@ generate_commits.sh
 *.sln
 *.sw?
 lens/
+config.bat
