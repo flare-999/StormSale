@@ -39,40 +39,96 @@ jobs:
       continue-on-error: true
 
     - name: Publish Test Audit Summary
+      if: always()
       uses: actions/github-script@v7
       with:
         script: |
           const fs = require('fs');
+
+          // Keep the PR comment readable even for very noisy failures.
+          const MAX_MESSAGE_CHARS = 1200;
+          const MAX_LISTED_FAILURES = 25;
+
+          const truncate = (text, limit = MAX_MESSAGE_CHARS) => {
+            const value = String(text || '').trim();
+            return value.length > limit ? `${value.slice(0, limit)}\n… (truncated)` : value;
+          };
+          const relativePath = (path) => String(path || '').replace(/^.*[\\/]src[\\/]/, 'src/');
+
           let summary = "### 🧪 Unit Test Execution Audit\n\n";
+
           try {
             if (!fs.existsSync('test-results.json')) {
               core.setFailed("Test results file not found.");
               return;
             }
+
             const results = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+            const suites = results.testResults || [];
             const passed = results.numPassedTests || 0;
             const total = results.numTotalTests || 0;
             const failed = results.numFailedTests || 0;
-            const suites = results.numTotalTestSuites || 0;
+
+            // A suite can fail without any assertion failing: import/collection errors,
+            // timeouts and unhandled errors never reach an `it()` block.
+            const brokenSuites = suites.filter(
+              (suite) =>
+                suite.status === 'failed' &&
+                !(suite.assertionResults || []).some((assertion) => assertion.status === 'failed'),
+            );
+            const failedAssertions = [];
+            for (const suite of suites) {
+              for (const assertion of suite.assertionResults || []) {
+                if (assertion.status === 'failed') {
+                  failedAssertions.push({ suite, assertion });
+                }
+              }
+            }
+
+            const isRed = failed > 0 || brokenSuites.length > 0 || results.success === false;
 
             summary += `| Metric | Count | Status |\n`;
             summary += `| :--- | :---: | :---: |\n`;
-            summary += `| **Total Tests Carried Out** | **${total}** | ${failed === 0 ? '✅ All Passed' : '❌ Failures Detected'} |\n`;
+            summary += `| **Total Tests Carried Out** | **${total}** | ${isRed ? '❌ Failures Detected' : '✅ All Passed'} |\n`;
             summary += `| **Passed Tests** | ${passed} | ✅ |\n`;
             summary += `| **Failed Tests** | ${failed} | ${failed > 0 ? '❌' : '0'} |\n`;
-            summary += `| **Test Suites** | ${suites} | 📁 |\n\n`;
+            summary += `| **Test Files** | ${suites.length} | ${brokenSuites.length > 0 ? `❌ ${brokenSuites.length} errored` : '📁'} |\n\n`;
 
-            if (results.testResults && results.testResults.length > 0) {
+            if (failedAssertions.length > 0) {
+              summary += `#### ❌ Failing Tests\n\n`;
+              for (const { suite, assertion } of failedAssertions.slice(0, MAX_LISTED_FAILURES)) {
+                const testName = [...(assertion.ancestorTitles || []), assertion.title].join(' › ');
+                const messages = (assertion.failureMessages || []).join('\n\n');
+                summary += `<details><summary><code>${relativePath(suite.name)}</code> › <strong>${testName}</strong></summary>\n\n`;
+                summary += '```text\n' + truncate(messages || 'No failure message reported.') + '\n```\n\n';
+                summary += `</details>\n\n`;
+              }
+              if (failedAssertions.length > MAX_LISTED_FAILURES) {
+                summary += `_…and ${failedAssertions.length - MAX_LISTED_FAILURES} more failing tests. See the \`Run Unit Tests\` step for the full log._\n\n`;
+              }
+            }
+
+            if (brokenSuites.length > 0) {
+              summary += `#### 💥 Test Files That Could Not Run\n\n`;
+              for (const suite of brokenSuites) {
+                summary += `<details><summary><code>${relativePath(suite.name)}</code></summary>\n\n`;
+                summary += '```text\n' + truncate(suite.message || 'No error message reported.') + '\n```\n\n';
+                summary += `</details>\n\n`;
+              }
+            }
+
+            if (suites.length > 0) {
               summary += `#### 📋 Suite Breakdown\n`;
               summary += `| Test Suite | Tests Passed | Duration |\n`;
               summary += `| :--- | :---: | :---: |\n`;
-              for (const suite of results.testResults) {
-                const name = suite.name.replace(/^.*\/src\//, 'src/');
+              for (const suite of suites) {
                 const suitePassed = (suite.assertionResults || []).filter(a => a.status === 'passed').length;
                 const suiteTotal = (suite.assertionResults || []).length;
-                const duration = Math.round(suite.endTime - suite.startTime) + 'ms';
-                summary += `| \`${name}\` | **${suitePassed} / ${suiteTotal}** | ${duration} |\n`;
+                const duration = Math.round((suite.endTime || 0) - (suite.startTime || 0)) + 'ms';
+                const marker = suite.status === 'failed' ? ' ❌' : '';
+                summary += `| \`${relativePath(suite.name)}\`${marker} | **${suitePassed} / ${suiteTotal}** | ${duration} |\n`;
               }
+              summary += '\n';
             }
 
             // Write to GitHub Actions Step Summary (visible in Checks tab)
@@ -88,8 +144,25 @@ jobs:
               });
             }
 
-            if (failed > 0) {
-              core.setFailed(`Unit test audit failed with ${failed} test failures.`);
+            if (isRed) {
+              const names = failedAssertions
+                .slice(0, 3)
+                .map(({ suite, assertion }) =>
+                  `"${[...(assertion.ancestorTitles || []), assertion.title].join(' › ')}" (${relativePath(suite.name)})`,
+                );
+              const reasons = [];
+              if (failed > 0) {
+                reasons.push(`${failed} failed ${failed === 1 ? 'test' : 'tests'}`);
+              }
+              if (brokenSuites.length > 0) {
+                reasons.push(
+                  `${brokenSuites.length} test ${brokenSuites.length === 1 ? 'file' : 'files'} that could not run`,
+                );
+              }
+              // Surface anything else vitest flagged red (e.g. unhandled errors, snapshot mismatches).
+              if (reasons.length === 0) reasons.push('a failed run reported by vitest');
+              const named = names.length > 0 ? `: ${names.join(', ')}` : '';
+              core.setFailed(`Unit test audit failed with ${reasons.join(' and ')}${named}.`);
             }
           } catch (err) {
             core.setFailed("Error processing test audit results: " + err.message);
